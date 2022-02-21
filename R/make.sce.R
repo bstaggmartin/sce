@@ -56,10 +56,10 @@ make.sce<-function(tree,disc,cont,
   k<-length(key)
   disc<-as.numeric(disc)
   if(hidden){
-    disc<-rep(1,n)
+    disc<-rep(1,length(tips))
     key<-letters[seq_len(k)]
   }
-  
+
   ##discretizing time##
   #get tree height and edge lengths
   hgt<-max(node.depth.edgelength(tree))
@@ -72,7 +72,7 @@ make.sce<-function(tree,disc,cont,
   dts<-elen/nts
   dts[is.nan(dts)]<-0 #for 0-length branches (like root edge)
   nts<-lapply(nts,seq_len)
-  
+
   ##discretizing continuous trait##
   #make a DFT plan
   plan<-planFFT(2*nx)
@@ -96,7 +96,7 @@ make.sce<-function(tree,disc,cont,
   norms<-matrix(gauss.DFT(nx,dx),nrow=2*nx,ncol=k)
   #function for scaling normal distribution DFTs based on sig2/time interval
   DFT.norms<-function(scalar) exp(sweep(norms,2,scalar,'*',check.margin=FALSE))
-  
+
   ##formatting trait data into joint array##
   #make array --> dim1 = edges, dim2 = continuous trait, dim3 = discrete trait
   #each cell represents partial conditional likelihood of observed data given that the...
@@ -131,7 +131,7 @@ make.sce<-function(tree,disc,cont,
     scalar.init<-scalar.init+(k-1)*scalar.init #add extra scalars for extra conditional likelihoods...
   }
   scalar.init<-scalar.init-1 #no idea where extra -1 comes from
-  
+
   ##miscellaneous things##
   QQ<-Q<-matrix(0,nrow=k,ncol=k)
   Q.diag<-seq.int(1,k^2,k+1)
@@ -142,7 +142,7 @@ make.sce<-function(tree,disc,cont,
   mult<-function(XX){
     eval(str2lang(paste0('XX[',seq_len(dim(XX)[1]),',,,drop=FALSE]',collapse='*')))
   }
-  
+
   ##helper functions##
   form.par<-function(par,forwards=FALSE){
     #format parameters --> given on log scale since they all must be positive
@@ -225,7 +225,7 @@ make.sce<-function(tree,disc,cont,
       max(lik)+scalar
     }
   }
-  
+
   #actual function to output
   lik.fun<-function(par,
                     return.array=FALSE){
@@ -252,7 +252,7 @@ make.sce<-function(tree,disc,cont,
       -root.calc(tmp[[1]],scalar)
     }
   }
-  
+
   recon.fun<-function(par){
     tmp<-form.par(par,forwards=TRUE)
     sig2<-tmp[[1]]
@@ -282,7 +282,7 @@ make.sce<-function(tree,disc,cont,
     attr(PP,'xpts')<-xpts
     PP
   }
-  
+
   out<-list('lik.fun'=lik.fun,'recon.fun'=recon.fun)
   attr(out,'key')<-key
   out
