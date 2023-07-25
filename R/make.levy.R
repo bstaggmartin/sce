@@ -25,7 +25,7 @@ make.levy<-function(tree,dat,model=c('JN','NIG','VG'),
   DFT.X<-function(X) FFT(c(X,pad),plan=plan)
   IDFT.X<-function(X) Re(IFFT(X,plan=plan)[nonpad])
   #make DFTs for transition probabilities
-  DFT.N<-gauss.DFT(nx,dx)
+  DFT.N<-BM.DFT(nx,dx)
   DFT.L<-switch(model,
                 JN.DFT(nx,dx),
                 NIG.DFT(nx,dx),
@@ -107,7 +107,10 @@ make.levy<-function(tree,dat,model=c('JN','NIG','VG'),
   #actual function to output
   lik.fun<-function(par,
                     return.array=FALSE){
-    par<-exp(par)
+    #par<-exp(par)
+    if(any(par<0)){
+      return(Inf)
+    }
     rate<-par[1]
     jump<-par[2]
     sig2<-par[3]
@@ -133,11 +136,14 @@ make.levy<-function(tree,dat,model=c('JN','NIG','VG'),
   }
 
   recon.fun<-function(par){
-    par<-exp(par)
+    tmp<-lik.fun(par,return.array=TRUE)
+    if(!is.list(tmp)){
+      stop('underflow')
+    }
+    #par<-exp(par)
     rate<-par[1]
     jump<-par[2]
     sig2<-par[3]
-    tmp<-lik.fun(par,return.array=TRUE)
     #X and XX = conditional likelihoods for each edge given descendants
     #XX contains conditional likelihood propagated down edge towards root
     #G = conditional likelihoods for each edge given non-descendants
@@ -162,6 +168,158 @@ make.levy<-function(tree,dat,model=c('JN','NIG','VG'),
     PP
   }
 
-  out<-list('lik.fun'=lik.fun,'recon.fun'=recon.fun)
+  map.fun<-function(par,nt=100,
+                    stochastic=FALSE,nsim=100){
+    #par<-exp(par)
+    rate<-par[1]
+    jump<-par[2]
+    sig2<-par[3]
+
+    ##discretizing time##
+    elen<-c(elen,0)
+    #"ideal" time interval based on nt
+    dt<-hgt/nt
+    #find time res along each branch
+    nts<-ceiling(elen/dt)
+    #actual time interval along each branch
+    dts<-elen/nts
+    dts[is.nan(dts)]<-0 #for 0-length branches
+    nts.seq<-lapply(nts,seq_len)
+
+    ##new output matrix list##
+    new.X<-lapply(nts+1,function(ii) matrix(nrow=ii,ncol=nx))
+    for(i in tips){
+      new.X[[i]][nts[i]+1,]<-X[i,,drop=FALSE]
+    }
+    X<-new.X
+
+    ##dirac delta DFT function##
+    DFT.dir<-dirac.DFT(nx,dx,x0=xpts[1])
+
+    ##redefine helper functions##
+    prop.liks<-function(X,rate,jump,sig2,dt,nt,nt.seq,
+                        forwards=FALSE){
+      #levy DFT for given t
+      L<-DFT.L(dt,rate,jump)
+      #normal DFT for given t
+      N<-DFT.N(dt,sig2)
+      #convolved DFT
+      LN<-L*N
+      if(forwards){
+        #get DFTs of conditional likelihoods
+        tmp.X<-DFT.X(X[1,])
+        for(i in nt.seq+1){
+          tmp.X<-tmp.X*LN
+          #invert convolved DFT
+          X[i,]<-IDFT.X(tmp.X)
+        }
+      }else{
+        #get DFTs of conditional likelihoods
+        tmp.X<-DFT.X(X[nt+1,])
+        for(i in rev(nt.seq)){
+          tmp.X<-tmp.X*LN
+          #invert convolved DFT
+          X[i,]<-IDFT.X(tmp.X)
+        }
+      }
+      X
+    }
+    sample.fxn<-function(prob){
+      unlist(lapply(seq_len(nsim),function(ii) sample(nx,1,prob=prob[,ii])),
+             use.names=FALSE)
+    }
+    stochastic.prop.fw<-function(x0,X,rate,jump,sig2,dt,nt,nt.seq){
+      out<-matrix(nrow=nt+1,ncol=nsim)
+      out[1,]<-x0
+      tmp.P<-matrix(nrow=nx,ncol=nsim)
+      #levy DFT for given t
+      L<-DFT.L(dt,rate,jump)
+      #normal DFT for given t
+      N<-DFT.N(dt,sig2)
+      #convolved DFT
+      LN<-L*N
+      for(i in nt.seq+1){
+        #get PDF by inverting convolved DFTs and multiplying with "backwards" conditional liks
+        for(j in seq_len(nsim)){
+          tmp.P[,j]<-IDFT.X(DFT.dir(x0[j])*LN)*X[i,,drop=FALSE]
+        }
+        #eliminate negative probs
+        tmp.P[tmp.P<0]<-0
+        #sample based on PDF
+        out[i,]<-x0<-xpts[sample.fxn(tmp.P)]
+      }
+      out
+    }
+    comb.liks<-function(X){
+      #mutliply conditional likelihoods to get conditional likelihoods at focal node
+      X<-Reduce('*',X)
+      L<-max(X)
+      #check to make sure node has defined conditional likelihoods
+      #otherwise some sig2 is too low for accurate calculations...
+      if(is.nan(L)|is.infinite(L)|is.na(L)){
+        NULL
+      }else if(L<0){
+        NULL
+      }else{
+        #rescale conditional likelihoods to prevent underflow
+        list(X/L,log(L))
+      }
+    }
+
+    ##pruning recursion##
+    for(i in prune.seq){
+      tmp.des<-des[[i]]
+      for(j in tmp.des){
+        X[[j]]<-prop.liks(X[[j]],rate,jump,sig2,dts[j],nts[j],nts.seq[[j]])
+      }
+      tmp<-comb.liks(lapply(X[tmp.des],function(ii) ii[1,,drop=FALSE]))
+      if(is.null(tmp)){
+        stop('underflow')
+      }
+      X[[i]][nts[i]+1,]<-tmp[[1]]
+    }
+
+    ##cladewise recursion##
+    if(stochastic){
+      out<-vector('list',nedge)
+      tmp.P<-X[[nedge]]
+      tmp.P[tmp.P<0]<-0
+      out[[nedge]]<-matrix(sample(xpts,nsim,prob=tmp.P),1,nsim)
+      attr(out[[nedge]],'tpts')<-0
+      for(i in seq.int(nedge-1,1)){
+        tmp.anc<-anc[i]
+        x0<-out[[tmp.anc]][nts[tmp.anc]+1,]
+        out[[i]]<-stochastic.prop.fw(x0,X[[i]],rate,jump,sig2,dts[i],nts[i],nts.seq[[i]])
+        attr(out[[i]],'tpts')<-c(0,nts.seq[[i]])*dts[i]+attr(out[[tmp.anc]],'tpts')[nts[tmp.anc]+1]
+      }
+      out
+    }else{
+      PP<-G<-X
+      G[[nedge]][1,]<-1
+      PP[[nedge]]<-G[[nedge]]*X[[nedge]] #technically don't have to do this, but do have initialize G to have all the 1s...
+      PP[[nedge]][1,]<-PP[[nedge]]/(dx*sum(PP[[nedge]]))
+      attr(PP[[nedge]],'tpts')<-0
+      for(i in seq.int(nedge-1,1)){
+        tmp.anc<-anc[i]
+        tmp.sis<-sis[[i]]
+        tmp.G<-Reduce('*',
+                      c(list(G[[tmp.anc]][nts[tmp.anc]+1,,drop=FALSE]),
+                        lapply(X[tmp.sis],function(ii) ii[1,,drop=FALSE])))
+        tmp.max<-max(tmp.G)
+        tmp.G<-tmp.G/tmp.max
+        G[[i]][1,]<-tmp.G
+        G[[i]]<-prop.liks(G[[i]],rate,jump,sig2,dts[i],nts[i],nts.seq[[i]],forwards=TRUE)
+        PP[[i]]<-G[[i]]*X[[i]]
+        #divided by dx to integrate to 1
+        sums<-Reduce('+',asplit(PP[[i]],2))*dx
+        PP[[i]]<-sweep(PP[[i]],1,sums,'/')
+        attr(PP[[i]],'tpts')<-c(0,nts.seq[[i]])*dts[i]+attr(PP[[tmp.anc]],'tpts')[nts[tmp.anc]+1]
+      }
+      attr(PP,'xpts')<-xpts
+      PP
+    }
+  }
+
+  out<-list('lik.fun'=lik.fun,'recon.fun'=recon.fun,'map.fun'=map.fun)
   out
 }
