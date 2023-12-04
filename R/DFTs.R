@@ -41,6 +41,58 @@ NIG.DFT<-function(nx,dx){
   out
 }
 
+#trying to figure out more general formulas (Kyprianou's lecture notes)...not working yet (https://people.bath.ac.uk/ak257/LCSB/part1.pdf)
+#now appears to closer but produces some really wonky results...
+#realized that we could avoid complex numbers here because they cancel out with the 1i in the characteristic function
+#this seems to yield a more stable formula, but there's still this weirdness where I have multiply everything by -1 compared to the given formula
+#(as it is in Landis' paper)
+#what's going on here?
+#also does imply different dynamics from Landis' paper--more jumpy
+#but maybe this is the correct version? Hard to tell...Would have to simulate to find out
+#this one seems to imply unrealistic jumpiness, regardless of whether base is multiplied by 2 or not...
+#I wonder where the discrepancy lies...
+#yes! Found another source that gives the explicit characteristic function: http://www2.math.uni-wuppertal.de/~ruediger/pages/vortraege/ws1112/nig_5.pdf
+#seems to imply Landis had the right of it, unfortunately...which makes me worried about those formulas in Kyprianou's lecture notes
+#ultimately lead you right back to Landis' formula! Crazy...
+#in any case, it works and agrees with original approach now
+#checked variance gamma process--having trouble making sense of Kyprianou's formulas there too
+#Oh, it's just because I switched up the parameterization--all good and seems right!
+#Kyprianou just seems to have made a typo where 2*i*theta should've been (i*theta)^2
+#And his formulas are all multiplied by -1
+# NIG.DFT2<-function(nx,dx){
+#
+#   # len<-2*nx+1
+#   # base<- -1i*seq(0,2*pi/dx,length.out=len)[-len]
+#
+#   # tmp<-seq(0,pi/dx,length.out=nx+1)
+#   # base<- -1i*c(tmp,tmp[-c(1,nx+1)]+tmp[nx+1])
+#
+#   tmp<-seq(0,pi/dx,length.out=nx+1)
+#   base<- c(tmp,tmp[nx:2])
+#
+#   # len<-2*nx+1
+#   # base<- seq(0,2*pi/dx,length.out=len)[-len]
+#
+#   out<-function(t,rate,jump){
+#     inv.jump<-1/jump
+#     exp(t*rate*(sqrt(inv.jump)-sqrt(inv.jump+base^2)))
+#   }
+#   out
+# }
+# nx<-1024
+# dx<-0.1
+# base<-.get.base(nx,dx)
+# plot(base,type="l")
+# NIG<-NIG.DFT(nx,dx)
+# NIG2<-NIG.DFT2(nx,dx)
+# plot(abs(fftw::IFFT(NIG(2,1,1))),type="l")
+# plot(abs(fftw::IFFT(NIG2(2,1,1))),type="l")
+#
+# gauss<-gauss.DFT(nx,dx)
+# xx<-seq(0,by=dx,length.out=nx)
+# plot(Re(fftw::IFFT(gauss(60,5)))[1:1024]~xx,type="l");abline(v=1)
+
+
 #this seems right
 #variance gamma process DFT
 #t is time, rate is 1/nu, jump is tau2
@@ -49,9 +101,6 @@ VG.DFT<-function(nx,dx){
   base<-.get.base(nx,dx)
   out<-function(t,rate,jump){
     (1+base*jump/(2*rate))^(-t*rate)
-    #exp(t*x) = (1+base*jump/(2*rate))^(-t*rate)
-    #t*x = -t*rate*ln(1+base*jump/(2*rate))
-    #x = -rate*ln(1+base*jump/(2*rate))
   }
   out
 }
@@ -80,6 +129,7 @@ gauss.DFT<-function(nx,dx,x0=0){
     exp((x-x0)*loc.base+sig2*scale.base)
   }
 }
+
 #
 # nx<-1024
 # dx<-0.245

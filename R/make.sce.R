@@ -1,3 +1,100 @@
+#generalizing...
+#disc.mod may be a Q matrix template, with diagonal entries ignored
+#cont.mod is a vector of state models, defaulting to BM for every state but allowing "JN", "VG", and "NIG" as well
+#par.template controls how cont.mod parameters are structured:
+# eventually will look like matrices with each row corresponding to a state and each column to a cont.mod parameter
+# i.e., sig2 = rate, mu = drift, lambda = freq, tau2 = jump, delta = skew
+# can be coarsely controlled by passing vector of "flags": AXD for all X diff (where X is R for rate, D for drift, etc.)...
+# ...or AX0 for all X set to 0 (for disabling drift, BM, etc.)
+# can be more finely controlled by passing template matrix
+make.sce<-function(tree,disc.dat,cont.dat,cont.se=0,
+                   disc.mod=c("ARD","SYM","ER"),
+                   cont.mod="BM",
+                   par.template=c("ARD","AD0","AF0","AJ0","AS0"),
+                   res=1024,bds.exp.fac=0.5,
+                   integrate.root=TRUE){
+  ##tree topology info##
+  list2env(.get.tree.topo.info(tree,pruning=TRUE),envir=environment())
+  #intial continuous data processing
+  cont<-cont[tips.ord]
+  #initial discrete data processing
+  disc<-disc[tips.ord]
+  nas<-is.na(disc)
+  disc<-strsplit(disc,'&')
+  key<-sort(unique(unlist(disc,use.names=FALSE)))
+  k<-length(key)
+  disc<-lapply(disc,function(ii) match(ii,key))
+  disc[nas]<-list(seq_len(k))
+  rows<-.row(c(k,k))
+  cols<-.col(c(k,k))
+  lt<-rows>cols
+  ut<-rows<cols
+  dg<-rows==cols
+  odg<-lt|ut
+
+  #discrete model
+  if(!is.matrix(disc.mod)){
+    if(is.numeric(disc.mod)) disc.mod<-c('ARD','SYM','ER')[disc.mod[1]]
+    code<-pmatch(disc.mod[1],c('ARD','SYM','ER'),nomatch=1)
+    Q.template<-matrix(0,nrow=k,ncol=k,
+                       dimnames=list(key,key))
+    if(code==2){
+      Q.template[lt]<-seq_len((k^2-k)/2)
+      Q.template[ut]<-t(Q.template)[ut]
+    }else{
+      Q.template[odg]<-if(code==1) seq_len(k^2-k) else 1
+    }
+  }else{
+    #making sure rows/columns of custom Q.template are named, while respecting any given names...
+    # ...and coercing Q.template into a square matrix in the process.
+    #Also ensures parameter indices make sense and defaults unspecified parameters to 0
+    dimnms<-dimnames(Q.template)
+    rownms<-rownames(Q.template)
+    if(is.null(rownms)) rownms<-rep(NA,nrow(Q.template))
+    rownms[!nzchar]<-NA
+    colnms<-colnames(Q.template)
+    if(is.null(colnms)) colnms<-rep(NA,ncol(Q.template))
+    colnms[!nzchar]<-NA
+    colnms[is.na(colnms)]<-rownms[is.na(colnms)]
+    rownms[is.na(rownms)]<-colnms[is.na(rownms)]
+    rowmatches<-pmatch(rownms,key)
+    inds<-!is.na(rowmatches)
+    rownms[inds]<-key[rowmatches[inds]]
+    colmatches<-pmatch(colnms,key)
+    inds<-!is.na(colmatches)
+    colnms[inds]<-key[colmatches[inds]]
+
+    #use extraneous columns to "fill in" for any unspecified rows/columns?
+
+    dimnames(Q.template)<-list(rownms,colnms)
+    Q.template<-Q.template[key,key]
+    dimnames(Q.template)<-list(key,key)
+    par.vec<-sort(unique(as.vector(Q.template)))
+    par.vec<-par.vec[par.vec!=0&!is.na(par.vec)]
+    Q.template[]<-match(Q.template,par.vec,nomatch=0L)
+  }
+  par.vec<-rep(0,k^2)
+  nz.inds<-Q.template!=0
+
+  #continuous model
+  nms<-names(cont.mod)
+  if(is.null(nms)){
+    nms<-rep(NA,length(cont.mod))
+  }
+  if(is.numeric(cont.mod)) cont.mod<-c("BM","JN","NIG","VG")[cont.mod]
+  code<-pmatch(cont.mod,c("BM","JN","NIG","VG"),nomatch=1)
+
+  #continuous model parameters
+  if(!is.matrix(par.template)){
+
+  }else{
+    colnms<-colnames(par.template)
+    pmatch(colnms,c("rate","drift","frequency","jump","skew"))
+    rownms<-rownames(par.template)
+    pmatch(rownms,key)
+  }
+}
+
 #hidden just turns off discrete trait info--make more complicated
 #some numerical instability indicates that it might be a good idea to make a "careful" version that directly uses matrix exponentiation
 #'@export
