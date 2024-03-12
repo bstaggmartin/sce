@@ -34,26 +34,42 @@
 library(sce)
 
 set.seed(321)
-tree<-phytools::pbtree(n=500,scale=1)
+tree<-phytools::pbtree(n=100,scale=1)
 test<-sim.sce(tree,
-              nstates=2,
-              disc.mods=c(1,1),
-              cont.mods="NIG",
-              rates=c(0,0),
+              nstates=4,
+              disc.mods=matrix(c(-2,1,1,0,1,-2,0,1,1,0,-2,1,0,1,1,-2),4,4),
+              cont.mods="JN",
+              rates=c(1,5,5,10),
               drifts=c(0,0),
-              freqs=c(2,2),
-              jumps=c(1,1),
-              skews=c(0.7,0.7),
+              freqs=c(0,0),
+              jumps=c(0,0),
+              skews=c(0,0),
               disc.roots=1)
 phytools::phenogram(get.params(test,"tree")[[1]][[1]],test$cont[,1],ftype="off")
 cont<-test$cont[,1]
 disc<-test$disc[,1]
 
-fun<-make.sce(tree,disc,cont,res=256,rates=0,freqs="EQ",jumps="EQ",skews="EQ",cont.mods="NIG")
+new.disc<-setNames(
+  rep(c("STATE_1A&STATE_1B","STATE_2A&STATE_2B"),each=2)[match(disc,c("STATE_1","STATE_2","STATE_3","STATE_4"))],
+  names(disc)
+)
+# new.disc<-setNames(
+#   do.call(paste,c(lapply(LETTERS[1:2],function(ii) paste0(disc,ii)),sep="&")),
+#   names(disc)
+# )
+
+
+Qo<-matrix(c(0,1,2,0),2,2,
+           dimnames=rep(list(sort(unique(disc))[1:2]),2))
+Qh<-matrix(c(0,3,4,0),2,2,
+           dimnames=rep(list(LETTERS[1:2]),2))
+tmplt<-as.matrix(Matrix::bdiag(rep(list(Qh),nrow(Qo)))+kronecker(Qo,diag(nrow(Qh))))
+rownames(tmplt)<-colnames(tmplt)<-paste0(rownames(Qo),rep(rownames(Qh),each=nrow(Qh)))
+fun<-make.sce(tree,new.disc,cont,res=256,disc.mods=tmplt)
 
 # tmp.seed<-rnorm(8)
 # numDeriv::grad(fun$lik,tmp.seed)-fun$grad_lik(tmp.seed)$gradient
-fit<-find.mle(fun,verbose=TRUE,lb=c(-Inf,-Inf,-Inf,-Inf,-0.99),ub=c(Inf,Inf,Inf,Inf,0.99))
+fit<-find.mle(fun,verbose=TRUE,lb=-10,ub=10)
 
 
 
@@ -63,6 +79,8 @@ find.mle(fun,init=t(fit$estimates),verbose=TRUE,init.width=5,algorithm="NLOPT_LD
 
 hess<-numDeriv::hessian(fun$lik,fit$estimates)
 sqrt(diag(solve(hess)))
+tmp.foo<-function(x) fun$grad_lik(x)[["gradient"]]
+hess2<-numDeriv::jacobian(tmp.foo,fit$estimates,method="simple") #same but a lot quicker
 
 tmp<-make.sce(tree,disc,cont,res=512,freqs="SD",jumps="SD")
 test.fit<-nloptr::nloptr(rnorm(8),tmp[[1]],opts=list(algorithm="NLOPT_LN_SBPLX",
@@ -75,31 +93,37 @@ test.fit<-nloptr::nloptr(rnorm(8),tmp[[1]],opts=list(algorithm="NLOPT_LN_SBPLX",
 rec<-fun$recon(fit$estimates,probs=c(0.5,0.025,0.975,0.001,0.999))
 
 Cairo::CairoPDF("test_recon.pdf",width=8.5,height=11)
-phytools::phenogram(tree,rec$cont[,1],ftype="off",
-                    ylim=range(rec$cont),
-                    lwd=2)
+phytools::phenogram(#tree,
+  get.params(test,"tree")[[1]][[1]],
+  colors=setNames(hcl.colors(5)[-5],paste0("STATE_",c(2,1,4,3))),
+  rec$cont[,1],ftype="off",
+  ylim=range(rec$cont),
+  lwd=2)
 segments(x0=ape::node.depth.edgelength(tree),
          y0=rec$cont[,2],
          y1=rec$cont[,3])
 segments(x0=ape::node.depth.edgelength(tree)-0.01,
          x1=ape::node.depth.edgelength(tree)+0.01,
          y0=c(rec$cont[,2],rec$cont[,3]))
-ape::nodelabels(pie=rec$disc[-seq_len(ape::Ntip(tree)),1:2],
-                piecol=hcl.colors(3)[-3],
+ape::nodelabels(pie=rec$disc[-seq_len(ape::Ntip(tree)),],
+                piecol=hcl.colors(5)[-5],
                 cex=0.5)
-ape::tiplabels(pie=rec$disc[seq_len(ape::Ntip(tree)),1:2],
-               piecol=hcl.colors(3)[-3],
+ape::tiplabels(pie=rec$disc[seq_len(ape::Ntip(tree)),],
+               piecol=hcl.colors(5)[-5],
                cex=0.5)
 dev.off()
 
 Cairo::CairoPDF("test_recon3.pdf",width=8.5,height=11)
 #violin plot test...
-phytools::phenogram(tree,rec$cont[,1],ftype="off",
+phytools::phenogram(#tree,
+                    get.params(test,"tree")[[1]][[1]],
+                    colors=setNames(hcl.colors(5)[-5],paste0("STATE_",c(2,1,4,3))),
+                    rec$cont[,1],ftype="off",
                     ylim=range(rec$cont),
                     lwd=2)
 wd<-diff(par()$usr[1:2])
 xx<-attr(rec$joint,"xpts")
-cols<-hcl.colors(3)[-3]
+cols<-hcl.colors(5)[-5]
 for(i in seq_len(dim(rec$joint)[1])){
   tmp.inds<-xx>rec$cont[i,4]&xx<rec$cont[i,5]
   # tmp.inds<-rep(TRUE,dim(rec$joint)[3])

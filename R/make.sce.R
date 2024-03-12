@@ -98,6 +98,7 @@ make.sce<-function(tree,disc,cont,
     }
   }else{
     ##2/15: STILL NEED TO MAKE SURE THIS ALL WORKS##
+    Q.template<-disc.mods
 
     #making sure rows/columns of custom Q.template are named, while respecting any given names...
     # ...and coercing Q.template into a square matrix in the process.
@@ -105,10 +106,10 @@ make.sce<-function(tree,disc,cont,
     dimnms<-dimnames(Q.template)
     rownms<-rownames(Q.template)
     if(is.null(rownms)) rownms<-rep(NA,nrow(Q.template))
-    rownms[!nzchar]<-NA
+    rownms[!nzchar(rownms)]<-NA
     colnms<-colnames(Q.template)
     if(is.null(colnms)) colnms<-rep(NA,ncol(Q.template))
-    colnms[!nzchar]<-NA
+    colnms[!nzchar(colnms)]<-NA
     colnms[is.na(colnms)]<-rownms[is.na(colnms)]
     rownms[is.na(rownms)]<-colnms[is.na(rownms)]
     rowmatches<-pmatch(rownms,key)
