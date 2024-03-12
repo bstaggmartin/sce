@@ -73,13 +73,23 @@ JN.DFT<-function(nx,dx){
 #   out
 # }
 #final function
+# NIG.DFT<-function(nx,dx){
+#   bases<-.get.base(nx,dx)
+#   out<-function(t,lambda,tau2,delta){
+#     tau<-sqrt(tau2)
+#     inv.tau<-1/tau
+#     mdelta2<-1-delta^2
+#     exp(t*lambda*(inv.tau*sqrt(mdelta2)-inv.tau*sqrt(mdelta2-2*delta*tau*bases[[1]]+tau2*bases[[2]])))
+#   }
+#   out
+# }
+#I decided to switch lambda and tau2 ultimately...better reflect behavior
 NIG.DFT<-function(nx,dx){
   bases<-.get.base(nx,dx)
   out<-function(t,lambda,tau2,delta){
-    tau<-sqrt(tau2)
-    inv.tau<-1/tau
+    inv.lambda<-1/lambda
     mdelta2<-1-delta^2
-    exp(t*lambda*(inv.tau*sqrt(mdelta2)-inv.tau*sqrt(mdelta2-2*delta*tau*bases[[1]]+tau2*bases[[2]])))
+    exp(t*tau2*(inv.lambda*sqrt(mdelta2)-inv.lambda*sqrt(mdelta2-2*delta*lambda*bases[[1]]+lambda^2*bases[[2]])))
   }
   out
 }
@@ -110,7 +120,7 @@ NO.DFT<-function(nx,dx,x0=0){
 }
 
 nx<-1024
-dx<-0.5
+dx<-0.05
 BM<-BM.DFT(nx,dx)
 xx<-c(seq(0,dx*nx,dx),seq(-dx*(nx-1),-dx,dx))
 perm.inds<-c((nx+2):(2*nx),1:(nx+1))
@@ -119,15 +129,140 @@ abline(v=-0.05*10.025)
 plot(BM(10.025,-0.05,1)) #sweet--yeah, this makes so much sense
 #it was that issue where you wanted things to symmetrically spread out!
 
+NIG<-NIG.DFT(nx,dx)
+plot((Re(fftw::IFFT(NIG(1,10,64,0.5))))[perm.inds]~xx[perm.inds],type="l")
+
+####RANDOM OU TEST####
+#holy crap it actually works!
+
+#taking derivatives...
+base<-.get.base(1024,0.1)[[1]]
+plot(Re(fftw::IFFT(BM(10.025,0,1)))[perm.inds]~xx[perm.inds],type="l")
+lines(Re(fftw::IFFT(BM(10.025,-1,1)*(-base)))[perm.inds]~xx[perm.inds],type="l")
+lines(Re(fftw::IFFT(BM(10.025,-1,1)*(-base)^2))[perm.inds]~xx[perm.inds])
+lines(Re(fftw::IFFT(BM(10.025,-1,1)*(-base)^3))[perm.inds]~xx[perm.inds])
+#suggests a simple pseudospectral recipe, right?
+#not as much as I thought...but I found a recipe that works
+#not sure about numerical stability, though, and doesn't preserve integral of function
+#figured out potentially a way to avoid repeatedly fft'ing, but still working on it
+#seems highly numerically unstable and can't figure out how to shift optimum to non-zero value...
+# pot<-dnorm(xx,15,3)[-((nx/2+1):(3*nx/2))]
+# plot(pot[perm.inds]~xx[perm.inds])
+# pot<-pot/sum(pot)
+nsteps<-1000
+t<-5
+dt<-t/nsteps
+DI<-DI.DFT(nx,dx)
+T1<-BM(1,15,0.1)
+dbase<-diff(base[1:2])
+#Okay, so I think I figured it out
+#d/dx ((x-u)P) = d/dx (xP) - d/dx (uP)
+#which is the derivative of the Phat (fourier transform of P) multiplied by base minus u times P multiplied by base
+#shit, numerically unstable, but it works...
+#there must be a way to determine the optimal timestep...
+#so you get these little "oscillation bubbles forming, which I feel like MUST have some kind of solution to prevent...
+#I wonder if you can just "smooth out" the frequency spectrum...
+#It works REALLY well though if you just find the right timestep to use...
+for(i in 2:nsteps){
+  T2<-BM(dt,0,9)*T1
+  # tmp<-Re(fftw::IFFT(T2))
+  # runs<-rle(tmp>0)
+  # inds<-runs$values&(runs$lengths>1)
+  # runs$values[inds]<-FALSE
+  # runs$values[!inds]<-TRUE
+  # tmp[inverse.rle(runs)]<-1e-16
+  # tmp[tmp<1e-16]<-1e-16
+  # tmp<-tmp[-((nx/2+1):(3*nx/2))]
+
+  #so, in the frequency domain, basically involves scaling the function by a bit
+  #and convolving the derivative of the function with...well, a line?
+  #is there a closed formula for that?
+  #ah, the problem is that a line isn't necessarily a line in the frequency domain...
+  #does have a formula, not sure if it's worth it yet...
+  #so it becomes a convolution between the first derivative of dirac delta and the fourier transform of dtmp...
+  #which, I think...should theoretically become the second derivative of the fourier transform of dtmp???
+
+
+  # dtmp<-Re(fftw::IFFT(T2*-base))
+  # dtmp<-dtmp[-((nx/2+1):(3*nx/2))]
+  # tmp2<-tmp+dt*0.5*(tmp+(xx[-((nx/2+1):(3*nx/2))]+5)*dtmp) #???
+  # tmp2<-c(tmp2[1:(nx/2)],rep(0,nx),tmp2[(nx/2+1):nx])
+  # dT2<-T2*-base
+  # ddT2<-c(dT2[1]-dT2[2*nx],diff(dT2))/dbase/2
+
+  # dT2.test<-fftw::FFT(fftw::IFFT(T2)*xx)
+  #little test to prevent numerical errors...
+  #didn't work...
+  # T2[(nx/2+1):(3*nx/2)]<-0
+
+  #I also tried averaging the across x derivatives between the previous and last timestep and it did little to improve things...
+  dT2<-(c(T2[-1],T2[1])-c(T2[2*nx],T2[-(2*nx)]))/(4*dbase)
+  #forward diffs? Nah, central is better...
+  # dT2<-(T2-c(T2[2*nx],T2[-(2*nx)]))/(2*dbase)
+  # test<-Re(fftw::IFFT(T2)*xx)
+  # plot(diff(test)/dx)
+  # plot(Re(fftw::IFFT(dT2*-2*base)))
+  T1<-T2+dt*0.5*((dT2+10*T2)*-2*base)
+  # plot(Re(fftw::IFFT(T1))[perm.inds]~xx[perm.inds],type="l")
+
+  # #one more test...is it more numerically stable to just use FFT?
+  # #less so, actually!
+  # dT2<-fftw::FFT(fftw::IFFT(T2)*xx)
+  # T1<-T2+dt*0.5*((dT2+10*T2)*-2*base)
+  # plot(Re(fftw::IFFT(T1))[perm.inds]~xx[perm.inds],type="l")
+
+  # #so what about this?
+  # #doesn't improve things either
+  # dT2<-(c(T2[-1],T2[1])-c(T2[2*nx],T2[-(2*nx)]))/(4*dbase)
+  # dT22<-fftw::IFFT(T2)
+  # dT22<-fftw::FFT((c(dT22[-1],dT22[1])-c(dT22[2*nx],dT22[-(2*nx)]))/(2*dx))
+  # T1<-T2+dt*0.5*(dT2*-2*base+10*dT22)
+  # plot(Re(fftw::IFFT(T1))[perm.inds]~xx[perm.inds],type="l")
+
+  # plot(Im(dT2))
+  # plot(Im(fftw::FFT(fftw::IFFT(dT2)*-1i*xx))) #seems like this works...
+  # plot(Im(diff(dT2))/dx) #seems like dividing by dx is the right thing to do...
+  # plot(cumsum(Im(fftw::FFT(fftw::IFFT(dT2)*-1i*xx)))*dx)
+  #hmmm...
+  # tmp3<-Re(fftw::IFFT(tmp3))[-((nx/2+1):(3*nx/2))] #holy shit, that might actually work...
+  # T1<-(1+dt*0.5)*(T2+c(dT2[1]-dT2[2*nx],diff(dT2)))
+  # T1<-(1+dt*0.5)*(T2+fftw::FFT(fftw::IFFT(dT2)*-1i*xx)) #so something interesting going on here, but unsure...something's going very wrong any time you try iterating...
+  # T1<-T2+dt*0.2*(T2+ddT2)
+  # plot(Re(fftw::IFFT(T1))[perm.inds]~xx[perm.inds],type="l")
+  #It works, but is numerically unstable...interesting concept though...
+
+  # runs<-rle(tmp>0)
+  # inds<-runs$values&(runs$lengths>1)
+  # runs$values[inds]<-FALSE
+  # runs$values[!inds]<-TRUE
+  # tmp[inverse.rle(runs)]<-1e-16
+  # tmp[tmp<1e-16]<-1e-16
+  # plot(tmp[perm.inds]~xx[perm.inds],type="l")
+  # T1<-fftw::FFT(tmp)
+  if(i==2|i%%100==0){
+    plot(Re(fftw::IFFT(T1)[perm.inds])~xx[perm.inds],type="l")
+  }
+}
+
+#line fourier transform test
+tmp<-rep(0,2*nx)
+tmp[c(2,2*nx-1)]<-c(-1,1)/dx
+test<-fftw::IFFT(tmp)
+plot(Im(test),type="l")
+
+tmp<-seq(min(xx),max(xx),length.out=2*nx)-5
+test<-fftw::FFT(tmp)
+plot(abs(test))
+
 JN<-JN.DFT(nx,dx)
 plot(abs(fftw::IFFT(JN(10.01,0.1,3,-1)))[perm.inds]~xx[perm.inds],type="l")
 plot(JN(10.01,0.1,3,-1))
 
 NIG<-NIG.DFT(nx,dx)
-plot((abs(fftw::IFFT(NIG(1,0.5,10,-1))))[perm.inds]~xx[perm.inds],type="l")
+plot((abs(fftw::IFFT(NIG(1,1,16,0))))[perm.inds]~xx[perm.inds],type="l")
 
 VG<-VG.DFT(nx,dx)
-plot((abs(fftw::IFFT(VG(10,0.1,2,-0.2))))[perm.inds]~xx[perm.inds],type="l")
+plot((Re(fftw::IFFT(VG(10,1,1,0))))[perm.inds]~xx[perm.inds],type="l")
 
 DI<-DI.DFT(nx,dx,0)
 plot(log(Re(fftw::IFFT(DI(-50.1)))[perm.inds])~xx[perm.inds])
