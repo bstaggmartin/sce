@@ -262,8 +262,15 @@ make.sce<-function(tree,disc,cont,
   par.pos<-(cols<(k+2)|cols==(k+3)|cols==(k+4))&par.ind
   par.pol<-(cols==(k+2)|cols==(k+5))&par.ind
   par.seq<-all.params[par.ind]
+  par.q.seq<-seq_len(max(all.params[,seq_len(k)]))
 
   lik<-function(par){
+    #uses 1st parameter as global "scaler"
+    #didn't really help
+    # mm<-par[1]
+    # par[1]<- -sum(par[par.q.seq[-1]])
+    # par[par.q.seq]<-mm+par[par.q.seq]
+
     all.params[par.ind]<-par[par.seq]
     all.params[par.pos]<-exp(all.params[par.pos])
     all.params[par.pol]<- -all.params[par.pol]
@@ -300,7 +307,13 @@ make.sce<-function(tree,disc,cont,
   }
 
   recon<-function(par,conf.lev=0.95,probs=NULL){
-    all.params[par.ind]<-par[par.seq]
+    #uses 1st parameter as global "scaler"
+    #didn't really help
+    # mm<-par[1]
+    # par[1]<- -sum(par[par.q.seq[-1]])
+    # par[par.q.seq]<-mm+par[par.q.seq]
+    # all.params[par.ind]<-par[par.seq]
+
     all.params[par.pos]<-exp(all.params[par.pos])
     tmp.Q<-all.params[,seq_len(k),drop=FALSE]
     R<-array(tmp.Q,c(k,k,2*res))

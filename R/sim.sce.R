@@ -365,6 +365,7 @@ sim.sce<-function(trees,
   #finally coerce trees to proper format
   #may at some point want to get disc.roots and/or Qs directly from simmap objects...
   disc.roots.lookup<-disc.mods.lookup<-rep(NA,length(trees))
+  nQ<-nR<-nn<-0
   if(any(!simmaps)){
     if(nstates>1){
 
@@ -555,7 +556,7 @@ sim.sce<-function(trees,
   nms<-lapply(params[[7]],"[[","nms")
   disc.out<-lapply(params[[7]],function(ii) ii[["disc"]])
   if(all(lengths(nms[-1])==length(nms[[1]]))){
-    matches<-do.call(cbind,c(list(seq_along(nms[[1]])),lapply(nms[-1],match,table=nms[[1]])))
+    matches<-do.call(cbind,c(list(seq_along(nms[[1]])),lapply(nms[-1],match,x=nms[[1]])))
     nn<-ncol(matches)
     if(!any(is.na(matches))){
       cont.out<-do.call(cbind,lapply(seq_len(nsims),function(ii) cont.out[[ii]][matches[,(ii-1)%%nn+1]]))
@@ -591,7 +592,7 @@ sim.sce<-function(trees,
     tmp.Qs<-lapply(params[[7]][simmaps],function(ii) ii[["disc.mods"]])
     avails<-lengths(tmp.Qs)>0
     nnn<-sum(avails)
-    Q<-array(c(Q,unlist(tmp.Qs,use.names=FALSE)),
+    Q<-array(if(nQ+nnn>0) c(Q,unlist(tmp.Qs,use.names=FALSE)) else 1,
              c(nstates,nstates,nQ+nnn),
              list(states,states,NULL))
     disc.mods.lookup[avails]<-nQ+seq_len(nnn)

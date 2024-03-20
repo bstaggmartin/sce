@@ -38,7 +38,9 @@
   ub.inf<-is.infinite(ub)
   lb[lb.inf]<-pmin(-init.width/2,ub[lb.inf]-init.width)
   ub[ub.inf]<-pmax(init.width/2,lb[ub.inf]+init.width)
-  cents<-cbind((lb+ub)/2,lb+init.width/2,ub-init.width/2)
+  cents<-(lb+ub)/2
+  cents[lb<0&ub>0]<-0
+  cents<-cbind(cents,lb+init.width/2,ub-init.width/2)
   whichs<-apply(abs(cents),1,which.min)
   cents<-cents[cbind(seq_len(npar),whichs)]
   lb<-pmax(lb,cents-init.width/2)
