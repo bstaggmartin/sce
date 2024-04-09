@@ -60,6 +60,10 @@ find.mle<-function(lik.fun,init=NULL,times=1,lb=NULL,ub=NULL,...,
                    verbose=FALSE,step=1e-4){
   par.nms<-as.character(seq_len(max(lik.fun$param_key)))
   npar<-length(par.nms)
+  if(lik.fun$se_unfixed){
+    npar<-npar+1
+    par.nms<-c(par.nms,npar)
+  }
   if(!is.null(lb)){
     lb<-.fix.bds(lb,upper=FALSE,par.nms)
   }

@@ -68,13 +68,30 @@ make.sce<-function(tree,disc,cont,
   #intial continuous data processing
   cont<-cont[tips.ord]
   #initial discrete data processing
-  disc<-disc[tips.ord]
-  nas<-is.na(disc)
-  disc<-strsplit(disc,'&')
-  key<-sort(unique(unlist(disc,use.names=FALSE)))
-  k<-length(key)
-  disc<-lapply(disc,function(ii) match(ii,key))
-  disc[nas]<-list(seq_len(k))
+  if(is.matrix(disc)){
+    disc<-disc[tips.ord,]
+    #need to add more checks
+    key<-sort(colnames(disc))
+    k<-length(key)
+    disc<-disc[,match(colnames(disc),key),drop=FALSE]
+    disc<-t(disc)
+    nas<-is.na(disc)
+    n.nas<-colSums(nas)
+    inds<-n.nas>0
+    n.nas<-n.nas[inds]
+    tmp.sums<-colSums(disc[,inds,drop=FALSE],na.rm=TRUE)
+    disc[nas]<-rep(max(0,1-tmp.sums)/n.nas,n.nas)
+    disc<-t(disc)
+  }else{
+    disc<-disc[tips.ord]
+    nas<-is.na(disc)
+    disc<-strsplit(disc,'&')
+    key<-sort(unique(unlist(disc,use.names=FALSE)))
+    k<-length(key)
+    disc<-lapply(disc,function(ii) match(ii,key))
+    disc[nas]<-list(seq_len(k))
+    disc<-do.call(rbind,lapply(disc,tabulate,nbin=k))
+  }
   rows<-.row(c(k,k))
   cols<-.col(c(k,k))
   lt<-rows>cols
@@ -224,27 +241,41 @@ make.sce<-function(tree,disc,cont,
   XX<-X<-array(0,c(nedge,k,2*res))
   scalar.init<- -ntips*log(dx)
 
-  #figured out the padding stuff --> x0 should be interval midpoint
-  init.dists<-get.DFTs(res,dx,c("NO","DI"),x0=(xpts[1]+xpts[res])/2)
+  if(!is.na(cont.se)){
+    est.se<-FALSE
+    #figured out the padding stuff --> x0 should be interval midpoint
+    init.dists<-get.DFTs(res,dx,c("NO","DI"),x0=(xpts[1]+xpts[res])/2)
 
-  #come up with better matching functionality for tip error...
-  #seems like cont.se should be at least 2*dx after all...
-  #3*dx to be safe...
-  #Lead to unexpected changes in likelihood as resolution changed!
-  #Instead best to just returning warnings about it
-  low.sigs<-(dx-cont.se)>1e-15
-  if(any(low.sigs)){
-    warning("Standard errors for some tips are very small; to ensure numerical stability, consider increasing res or standard errors. Ideally, standard errors should be no smaller than the grid resolution, which is given by (1+2*exp.bds.fac)/(res-1)*diff(range(cont))")
-  }
-  cont.var<-rep(cont.se^2,length.out=ntips)
+    #come up with better matching functionality for tip error...
+    #seems like cont.se should be at least 2*dx after all...
+    #3*dx to be safe...
+    #Lead to unexpected changes in likelihood as resolution changed!
+    #Instead best to just returning warnings about it
 
-  for(i in seq_along(tips)){
-    X[tips[i],disc[[i]],]<-rep(
-      if(cont.var[i])
-        init.dists[[1]](cont[i],cont.var[i])
-      else
-        init.dists[[2]](cont[i]), #technically unnecessary now, but oh well...
-      each=length(disc[[i]]))
+    low.sigs<-(dx-cont.se)>1e-15
+    if(any(low.sigs)){
+      warning("Standard errors for some tips are very small; to ensure numerical stability, consider increasing res or standard errors. Ideally, standard errors should be no smaller than the grid resolution, which is given by (1+2*exp.bds.fac)/(res-1)*diff(range(cont))")
+    }
+    cont.var<-rep(cont.se^2,length.out=ntips)
+
+    for(i in seq_along(tips)){
+      X[tips[i],,]<-rep(
+        if(cont.var[i])
+          init.dists[[1]](cont[i],cont.var[i])
+        else
+          init.dists[[2]](cont[i]), #technically unnecessary now, but oh well...
+        each=k)*disc[i,]
+    }
+  }else{
+    #unfixed tip error as parameter
+    est.se<-TRUE
+    init.dists<-unfixed.NO.DFT(res,dx,x0=(xpts[1]+xpts[res])/2)
+    for(i in seq_along(tips)){
+      X[tips[i],,]<-rep(
+        init.dists[["base"]](cont[i]),
+        each=k
+      )+log(disc[i,])
+    }
   }
 
   ##prepping inputs for C++ fun##
@@ -265,11 +296,14 @@ make.sce<-function(tree,disc,cont,
   par.q.seq<-seq_len(max(all.params[,seq_len(k)]))
 
   lik<-function(par){
-    #uses 1st parameter as global "scaler"
-    #didn't really help
-    # mm<-par[1]
-    # par[1]<- -sum(par[par.q.seq[-1]])
-    # par[par.q.seq]<-mm+par[par.q.seq]
+    if(est.se){
+      X[tips,,]<-
+        exp(sweep(X[tips,,,drop=FALSE],
+                  3,
+                  init.dists[["modder"]](exp(2*par[length(par)])),
+                  "+",check.margin=FALSE))
+      par<-par[-length(par)]
+    }
 
     all.params[par.ind]<-par[par.seq]
     all.params[par.pos]<-exp(all.params[par.pos])
@@ -307,13 +341,16 @@ make.sce<-function(tree,disc,cont,
   }
 
   recon<-function(par,conf.lev=0.95,probs=NULL){
-    #uses 1st parameter as global "scaler"
-    #didn't really help
-    # mm<-par[1]
-    # par[1]<- -sum(par[par.q.seq[-1]])
-    # par[par.q.seq]<-mm+par[par.q.seq]
-    # all.params[par.ind]<-par[par.seq]
+    if(est.se){
+      X[tips,,]<-
+        exp(sweep(X[tips,,,drop=FALSE],
+                  3,
+                  init.dists[["modder"]](exp(2*par[length(par)])),
+                  "+",check.margin=FALSE))
+      par<-par[-length(par)]
+    }
 
+    all.params[par.ind]<-par[par.seq]
     all.params[par.pos]<-exp(all.params[par.pos])
     tmp.Q<-all.params[,seq_len(k),drop=FALSE]
     R<-array(tmp.Q,c(k,k,2*res))
@@ -369,6 +406,7 @@ make.sce<-function(tree,disc,cont,
   dimnames(all.params)<-list("disc"=key,
                              c(key,"rates","drifts","freqs","jumps","skews"))
   list("lik"=lik,"recon"=recon,
+       "se_unfixed"=est.se,
        "param_key"=all.params,
        "cont_models"=c("JN","VG","NIG")[cont.mods],
        "grad_lik"=grad_lik)

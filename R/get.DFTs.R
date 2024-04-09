@@ -5,6 +5,7 @@
 #streamlined into single function that outputs list of DFT functions for specified distributions
 #can also output list of characteristic exponent functions
 #' @export
+
 get.DFTs<-function(nx,dx,
                   dist=c("BM","JN","VG","NIG","DI","NO"),
                   char.exp=FALSE,
@@ -112,4 +113,14 @@ get.DFTs<-function(nx,dx,
                                  exp((loc-x0)*bases[[1]]-scale*bases[[2]]/2)
                                }))
   }
+}
+
+#' @export
+unfixed.NO.DFT<-function(nx,dx,x0){
+  tmp<-seq(0,-pi/dx,length.out=nx+1)
+  bases<-1i*c(tmp,-tmp[nx:2])
+  tmp<-tmp^2
+  bases<-list(bases,-c(tmp,tmp[nx:2])/2)
+  list(base=function(loc) (loc-x0)*bases[[1]],
+       modder=function(scale) scale*bases[[2]])
 }
