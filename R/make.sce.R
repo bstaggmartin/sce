@@ -221,7 +221,8 @@ make.sce<-function(tree,disc,cont,
 
   ##discretizing continuous trait##
   #find min and max considered values for continuous trait
-  xlim<-range(cont)+c(-1,1)*bds.exp.fac*diff(range(cont))
+  xlim<-range(cont,na.rm=TRUE)+
+    c(-1,1)*bds.exp.fac*diff(range(cont,na.rm=TRUE))
   #get the breaks and find the inter-break distance
   xpts<-seq(xlim[1],xlim[2],length.out=res)
   dx<-diff(xpts[c(1,2)])
@@ -260,19 +261,28 @@ make.sce<-function(tree,disc,cont,
 
     for(i in seq_along(tips)){
       X[tips[i],,]<-rep(
-        if(cont.var[i])
-          init.dists[[1]](cont[i],cont.var[i])
-        else
-          init.dists[[2]](cont[i]), #technically unnecessary now, but oh well...
+        if(is.na(cont[i])){
+          c(1+0i,vector("complex",2*res-1))
+        }else{
+          if(cont.var[i])
+            init.dists[[1]](cont[i],cont.var[i])
+          else
+            init.dists[[2]](cont[i])
+        }, #technically unnecessary now, but oh well...
         each=k)*disc[i,]
     }
   }else{
     #unfixed tip error as parameter
     est.se<-TRUE
+    unfixed.tips<-tips[!is.na(cont)]
     init.dists<-unfixed.NO.DFT(res,dx,x0=(xpts[1]+xpts[res])/2)
     for(i in seq_along(tips)){
       X[tips[i],,]<-rep(
-        init.dists[["base"]](cont[i]),
+        if(is.na(cont[i])){
+          c(1+0i,vector("complex",2*res-1))
+        }else{
+          init.dists[["base"]](cont[i])
+        },
         each=k
       )+log(disc[i,])
     }
@@ -297,8 +307,8 @@ make.sce<-function(tree,disc,cont,
 
   lik<-function(par){
     if(est.se){
-      X[tips,,]<-
-        exp(sweep(X[tips,,,drop=FALSE],
+      X[unfixed.tips,,]<-
+        exp(sweep(X[unfixed.tips,,,drop=FALSE],
                   3,
                   init.dists[["modder"]](exp(2*par[length(par)])),
                   "+",check.margin=FALSE))
@@ -342,8 +352,8 @@ make.sce<-function(tree,disc,cont,
 
   recon<-function(par,conf.lev=0.95,probs=NULL){
     if(est.se){
-      X[tips,,]<-
-        exp(sweep(X[tips,,,drop=FALSE],
+      X[unfixed.tips,,]<-
+        exp(sweep(X[unfixed.tips,,,drop=FALSE],
                   3,
                   init.dists[["modder"]](exp(2*par[length(par)])),
                   "+",check.margin=FALSE))
