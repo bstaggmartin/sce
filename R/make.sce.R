@@ -277,14 +277,13 @@ make.sce<-function(tree,disc,cont,
     unfixed.tips<-tips[!is.na(cont)]
     init.dists<-unfixed.NO.DFT(res,dx,x0=(xpts[1]+xpts[res])/2)
     for(i in seq_along(tips)){
-      X[tips[i],,]<-rep(
+      X[tips[i],,]<-
         if(is.na(cont[i])){
-          c(1+0i,vector("complex",2*res-1))
+          cbind(disc[i,]+0i,
+                matrix(vector("complex",k*(2*res-1)),k,2*res-1))
         }else{
-          init.dists[["base"]](cont[i])
-        },
-        each=k
-      )+log(disc[i,])
+          rep(init.dists[["base"]](cont[i]),each=k)+log(disc[i,])
+        }
     }
   }
 
