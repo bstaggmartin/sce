@@ -62,7 +62,8 @@ make.sce<-function(tree,disc,cont,
                    jumps=0,
                    skews=0,
                    res=1024,bds.exp.fac=0.5,
-                   integrate.root=TRUE){
+                   integrate.root=TRUE,
+                   cores=getOption("mc.cores",1L)){
   ##tree topology info##
   list2env(.get.tree.topo.info(tree,pruning=TRUE),envir=environment())
   #intial continuous data processing
@@ -73,7 +74,7 @@ make.sce<-function(tree,disc,cont,
     #need to add more checks
     key<-sort(colnames(disc))
     k<-length(key)
-    disc<-disc[,match(colnames(disc),key),drop=FALSE]
+    disc<-disc[,match(key,colnames(disc)),drop=FALSE]
     disc<-t(disc)
     nas<-is.na(disc)
     n.nas<-colSums(nas)
@@ -242,49 +243,52 @@ make.sce<-function(tree,disc,cont,
   XX<-X<-array(0,c(nedge,k,2*res))
   scalar.init<- -ntips*log(dx)
 
-  if(!is.na(cont.se)){
-    est.se<-FALSE
-    #figured out the padding stuff --> x0 should be interval midpoint
-    init.dists<-get.DFTs(res,dx,c("NO","DI"),x0=(xpts[1]+xpts[res])/2)
+  #need better warning messages...
+  if(is.null(names(cont.se))){
+    names(cont.se)<-rep("",length(cont.se))
+  }
+  probs<-which(!(names(cont.se)%in%tree[["tip.label"]]))
+  matches<-match(tree[["tip.label"]],names(cont.se))
+  nas<-is.na(matches)
+  if(sum(nas)>0&length(probs)>0){
+    matches[nas]<-rep(probs,length.out=sum(nas))
+  }
+  cont.se<-setNames(cont.se[matches],tree[["tip.label"]])[tips.ord]
 
-    #come up with better matching functionality for tip error...
-    #seems like cont.se should be at least 2*dx after all...
-    #3*dx to be safe...
-    #Lead to unexpected changes in likelihood as resolution changed!
-    #Instead best to just returning warnings about it
-
-    low.sigs<-(dx-cont.se)>1e-15
-    if(any(low.sigs)){
-      warning("Standard errors for some tips are very small; to ensure numerical stability, consider increasing res or standard errors. Ideally, standard errors should be no smaller than the grid resolution, which is given by (1+2*exp.bds.fac)/(res-1)*diff(range(cont))")
-    }
-    cont.var<-rep(cont.se^2,length.out=ntips)
-
-    for(i in seq_along(tips)){
-      X[tips[i],,]<-rep(
-        if(is.na(cont[i])){
-          c(1+0i,vector("complex",2*res-1))
-        }else{
-          if(cont.var[i])
-            init.dists[[1]](cont[i],cont.var[i])
-          else
-            init.dists[[2]](cont[i])
-        }, #technically unnecessary now, but oh well...
-        each=k)*disc[i,]
-    }
-  }else{
-    #unfixed tip error as parameter
+  if(any(is.na(cont.se))){
     est.se<-TRUE
-    unfixed.tips<-tips[!is.na(cont)]
-    init.dists<-unfixed.NO.DFT(res,dx,x0=(xpts[1]+xpts[res])/2)
-    for(i in seq_along(tips)){
-      X[tips[i],,]<-
-        if(is.na(cont[i])){
-          cbind(disc[i,]+0i,
-                matrix(vector("complex",k*(2*res-1)),k,2*res-1))
-        }else{
-          rep(init.dists[["base"]](cont[i]),each=k)+log(disc[i,])
-        }
-    }
+    unfixed.tips<-tips[!is.na(cont)&is.na(cont.se)]
+  }else{
+    est.se<-FALSE
+  }
+
+  #seems like cont.se should be at least 2*dx after all...
+  #3*dx to be safe...
+  #Lead to unexpected changes in likelihood as resolution changed!
+  #Instead best to just returning warnings about it
+  low.sigs<-(dx-cont.se)>1e-15
+  if(any(low.sigs,na.rm=TRUE)){
+    warning("Standard errors for some tips are very small; to ensure numerical stability, consider increasing res or standard errors. Ideally, standard errors should be no smaller than the grid resolution, which is given by (1+2*exp.bds.fac)/(res-1)*diff(range(cont))")
+  }
+  cont.var<-cont.se^2
+
+  #figured out the padding stuff --> x0 should be interval midpoint
+  init.dists<-get.DFTs(res,dx,c("NO","DI"),x0=(xpts[1]+xpts[res])/2)
+  unfixed.init.dists<-unfixed.NO.DFT(res,dx,x0=(xpts[1]+xpts[res])/2)
+
+  #could definitely precompute some stuff to speed up here...
+  for(i in seq_along(tips)){
+    X[tips[i],,]<-
+      if(is.na(cont[i])){
+        cbind(disc[i,]+0i,
+              matrix(vector("complex",k*(2*res-1)),k,2*res-1))
+      }else if(is.na(cont.var[i])){
+        rep(unfixed.init.dists[["base"]](cont[i]),each=k)+log(disc[i,])
+      }else if(cont.var[i]){
+        rep(init.dists[[1]](cont[i],cont.var[i]),each=k)*disc[i,]
+      }else{
+        rep(init.dists[[2]](cont[i]),each=k)*disc[i,] #technically unnecessary now, but oh well...
+      }
   }
 
   ##prepping inputs for C++ fun##
@@ -309,7 +313,7 @@ make.sce<-function(tree,disc,cont,
       X[unfixed.tips,,]<-
         exp(sweep(X[unfixed.tips,,,drop=FALSE],
                   3,
-                  init.dists[["modder"]](exp(2*par[length(par)])),
+                  unfixed.init.dists[["modder"]](exp(2*par[length(par)])),
                   "+",check.margin=FALSE))
       par<-par[-length(par)]
     }
@@ -327,20 +331,62 @@ make.sce<-function(tree,disc,cont,
                                                          all.params[ii,k+5])+
                              conv.dists[[4]](all.params[ii,k+1],
                                              all.params[ii,k+2])))
+
     -sce_lik(R,X,c_des,des_pos,des_n,c_prune,elen,scalar.init)
   }
 
-  grad_lik<-function(par,step=1e-4){
-    obj<-lik(par)
-    hh<-step*abs(par)
-    hh[abs(par)<1]<-step
-    grad<-holder<-numeric(length(hh))
-    for(i in seq_along(hh)){
-      holder[i]<-hh[i]
-      grad[i]<-(lik(par+holder)-obj)/hh[i]
-      holder[i]<-0
+  #parallel test
+  if(cores>1){
+    cores<-min(cores,max(all.params)+if(est.se) 1 else 0)
+  }
+  if(cores>1){
+    cl<-makeCluster(cores)
+    clusterExport(cl,
+                  varlist=c("lik",
+                            "X",
+                            "est.se",
+                            if(est.se) "unfixed.tips",
+                            "init.dists",
+                            if(est.se) "unfixed.init.dists",
+                            "all.params",
+                            "par.ind",
+                            "par.seq",
+                            "par.pos",
+                            "par.pol",
+                            "k",
+                            "res",
+                            "conv.dists",
+                            "cont.mods",
+                            "c_des",
+                            "des_pos",
+                            "des_n",
+                            "c_prune",
+                            "elen",
+                            "scalar.init"),
+                  envir=environment())
+    clusterEvalQ(cl,{library(sce)})
+    grad_lik<-function(par,step=1e-4){
+      obj<-lik(par)
+      hh<-step*abs(par)
+      hh[abs(par)<1]<-step
+      grad<-holder<-numeric(length(hh))
+      pars<-lapply(seq_along(hh),function(ii) {par[ii]<-par[ii]+hh[ii];par})
+      list("objective"=obj,
+           "gradient"=(unlist(parLapply(cl,pars,function(ii) lik(ii)),use.names=FALSE)-obj)/hh)
     }
-    list("objective"=obj,"gradient"=grad)
+  }else{
+    grad_lik<-function(par,step=1e-4){
+      obj<-lik(par)
+      hh<-step*abs(par)
+      hh[abs(par)<1]<-step
+      grad<-holder<-numeric(length(hh))
+      for(i in seq_along(hh)){
+        holder[i]<-hh[i]
+        grad[i]<-(lik(par+holder)-obj)/hh[i]
+        holder[i]<-0
+      }
+      list("objective"=obj,"gradient"=grad)
+    }
   }
 
   get.quants<-function(x,probs){
@@ -354,7 +400,7 @@ make.sce<-function(tree,disc,cont,
       X[unfixed.tips,,]<-
         exp(sweep(X[unfixed.tips,,,drop=FALSE],
                   3,
-                  init.dists[["modder"]](exp(2*par[length(par)])),
+                  unfixed.init.dists[["modder"]](exp(2*par[length(par)])),
                   "+",check.margin=FALSE))
       par<-par[-length(par)]
     }
