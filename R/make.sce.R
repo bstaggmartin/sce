@@ -53,7 +53,9 @@
 #can also pass integers to assign to specific parameters
 #0 just sets parameter to 0 automatically
 make.sce<-function(tree,disc,cont,
-                   cont.se=diff(range(cont,na.rm=TRUE))/100,
+                   cont.se=diff(range(cont,cont.min,cont.max,na.rm=TRUE))/100,
+                   cont.min=NULL,
+                   cont.max=NULL,
                    disc.mods=c("ARD","SYM","ER"),
                    cont.mods="JN",
                    rates=c("SD","EQ"),
@@ -68,6 +70,31 @@ make.sce<-function(tree,disc,cont,
   list2env(.get.tree.topo.info(tree,pruning=TRUE),envir=environment())
   #intial continuous data processing
   cont<-cont[tips.ord]
+
+  #range-based data
+  ran<-matrix(nrow=length(tips),ncol=2,
+               dimnames=list(tips.ord,NULL))
+  ran.flag<-vector("logical",length(tips))
+  if(!is.null(cont.min)){
+    inds<-match(names(cont.max),tips.ord)
+    #need better warning messages
+    keeps<-!is.na(inds)
+    inds<-inds[keeps]
+    ran.flag[inds]<-TRUE
+    ran[inds,1]<-cont.min[keeps]
+  }
+  if(!is.null(cont.max)){
+    inds<-match(names(cont.max),tips.ord)
+    #need better warning messages
+    keeps<-!is.na(inds)
+    inds<-inds[keeps]
+    ran.flag[inds]<-TRUE
+    ran[inds,2]<-cont.max[keeps]
+  }
+  if(any(ran.flag)){
+    cont[ran.flag]<-rowMeans(ran[ran.flag,,drop=FALSE],na.rm=TRUE)
+  }
+
   #initial discrete data processing
   if(is.matrix(disc)){
     disc<-disc[tips.ord,]
@@ -257,7 +284,7 @@ make.sce<-function(tree,disc,cont,
 
   if(any(is.na(cont.se))){
     est.se<-TRUE
-    unfixed.tips<-tips[!is.na(cont)&is.na(cont.se)]
+    unfixed.tips<-tips[!is.na(cont)&!ran.flag&is.na(cont.se)]
   }else{
     est.se<-FALSE
   }
@@ -273,13 +300,17 @@ make.sce<-function(tree,disc,cont,
   cont.var<-cont.se^2
 
   #figured out the padding stuff --> x0 should be interval midpoint
-  init.dists<-get.DFTs(res,dx,c("NO","DI"),x0=(xpts[1]+xpts[res])/2)
+  init.dists<-get.DFTs(res,dx,c("NO","DI","SR"),x0=(xpts[1]+xpts[res])/2)
   unfixed.init.dists<-unfixed.NO.DFT(res,dx,x0=(xpts[1]+xpts[res])/2)
 
   #could definitely precompute some stuff to speed up here...
   for(i in seq_along(tips)){
     X[tips[i],,]<-
-      if(is.na(cont[i])){
+      if(ran.flag[i]){
+        rep(init.dists[[3]](max(ran[i,1],xpts[1],na.rm=TRUE),
+                            min(ran[i,2],xpts[res],na.rm=TRUE)),
+            each=k)*disc[i,]
+      }else if(is.na(cont[i])){
         cbind(disc[i,]+0i,
               matrix(vector("complex",k*(2*res-1)),k,2*res-1))
       }else if(is.na(cont.var[i])){

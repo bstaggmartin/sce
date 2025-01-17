@@ -4,17 +4,19 @@
 #best to make it intuitive
 #streamlined into single function that outputs list of DFT functions for specified distributions
 #can also output list of characteristic exponent functions
+#8/23/24 update: SR distribution "smoothed rectangular"
+#allows for uniform distributions convolved with narrowest possible normal dist
+#(to prevent ringing artifacts)
 #' @export
-
 get.DFTs<-function(nx,dx,
-                  dist=c("BM","JN","VG","NIG","DI","NO"),
+                  dist=c("BM","JN","VG","NIG","DI","NO","SR"),
                   char.exp=FALSE,
                   x0=0){
   if(is.null(dist)) dist<-1
   if(char.exp){
     dist.choices<-c("BM","JN","VG","NIG")
   }else{
-    dist.choices<-c("BM","JN","VG","NIG","DI","NO")
+    dist.choices<-c("BM","JN","VG","NIG","DI","NO","SR")
   }
   if(is.character(dist)){
     dist<-pmatch(dist,dist.choices)
@@ -111,6 +113,18 @@ get.DFTs<-function(nx,dx,
                                },
                                function(loc,scale){
                                  exp((loc-x0)*bases[[1]]-scale*bases[[2]]/2)
+                               },
+                               function(a,b){
+                                 # c(1,
+                                 #   (exp((b-x0)*bases[[1]][-1]-
+                                 #          dx^2*bases[[2]][-1]/2)-
+                                 #      exp((a-x0)*bases[[1]][-1]-
+                                 #      dx^2*bases[[2]][-1]/2))/
+                                 #     (bases[[1]][-1]*(b-a)))
+                                 tmp<-bases[[1]][-1]
+                                 c(1,
+                                   (exp((b-x0)*tmp)-exp((a-x0)*tmp))/
+                                     ((b-a)*tmp*exp(dx^2*bases[[2]][-1]/2)))
                                }))
   }
 }
